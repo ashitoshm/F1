@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>F1 Data Portal</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            padding-top: 20px;
+            background-color: #f8f9fa;
+        }
+        .header {
+            background-color: #e10600; /* F1 red */
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 30px;
+            border-radius: 5px;
+        }
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .form-select, .btn {
+            margin-bottom: 15px;
+        }
+        .season-btn {
+            margin: 5px;
+        }
+        #results-container {
+            margin-top: 20px;
+        }
+        .spinner-container {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header text-center">
+            <h1>Formula 1 Data Portal</h1>
+            <p>Explore historical F1 data for constructors and drivers</p>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header bg-dark text-white">
+                        Data Selection
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="data-type" class="form-label">Data Type:</label>
+                            <select id="data-type" class="form-select">
+                                <option value="constructors">Constructors</option>
+                                <option value="drivers">Drivers</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="season-input" class="form-label">Season (1950-present):</label>
+                            <input type="number" id="season-input" class="form-control" min="1950" max="2025" value="2023">
+                        </div>
+                        
+                        <button id="fetch-data-btn" class="btn btn-primary w-100">Fetch Data</button>
+                        <button id="trigger-etl-btn" class="btn btn-success w-100">Trigger ETL Pipeline</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header bg-dark text-white">
+                        Available Seasons
+                    </div>
+                    <div class="card-body">
+                        <div id="available-seasons">
+                            <p>Loading available seasons...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header bg-dark text-white">
+                        <span id="results-title">Results</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="spinner-container" id="spinner">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p>Processing data...</p>
+                        </div>
+                        <div id="results-container">
+                            <p>Select a data type and season, then click "Fetch Data" to view results.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Fetch available seasons on page load
+            fetchAvailableSeasons();
+
+            // Set up event listeners
+            document.getElementById('fetch-data-btn').addEventListener('click', fetchData);
+            document.getElementById('trigger-etl-btn').addEventListener('click', triggerETL);
+            
+            // Function to fetch available seasons
+            function fetchAvailableSeasons() {
+                fetch('/get-available-seasons')
+                    .then(response => response.json())
+                    .then(data => {
+                        const seasonsContainer = document.getElementById('available-seasons');
+                        if (data.all_seasons && data.all_seasons.length > 0) {
+                            let html = '<p>Click a season to load its data:</p><div>';
+                            data.all_seasons.forEach(season => {
+                                html += `<button class="btn btn-sm btn-outline-primary season-btn" data-season="${season}">${season}</button>`;
+                            });
+                            html += '</div>';
+                            seasonsContainer.innerHTML = html;
+                            
+                            // Add event listeners to season buttons
+                            document.querySelectorAll('.season-btn').forEach(btn => {
+                                btn.addEventListener('click', function() {
+                                    document.getElementById('season-input').value = this.dataset.season;
+                                    fetchData();
+                                });
+                            });
+                        } else {
+                            seasonsContainer.innerHTML = '<p>No seasons available. Use "Trigger ETL Pipeline" to fetch data.</p>';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching available seasons:', error);
+                        document.getElementById('available-seasons').innerHTML = 
+                            '<p class="text-danger">Error loading available seasons. Please check server connection.</p>';
+                    });
+            }
+            
+            // Function to fetch data based on selection
+            function fetchData() {
+                const dataType = document.getElementById('data-type').value;
+                const season = document.getElementById('season-input').value;
+                
+                // Validate season
+                if (!season || parseInt(season) < 1950 || parseInt(season) > new Date().getFullYear()) {
+                    alert(`Please enter a valid season between 1950 and ${new Date().getFullYear()}`);
+                    return;
+                }
+                
+                // Show spinner
+                document.getElementById('spinner').style.display = 'block';
+                document.getElementById('results-container').innerHTML = '';
+                document.getElementById('results-title').textContent = 
+                    `${dataType.charAt(0).toUpperCase() + dataType.slice(1)} - ${season} Season`;
+                
+                // Fetch data from appropriate endpoint
+                const endpoint = dataType === 'constructors' ? 
+                    `/get-f1-constructors/${season}` : `/get-f1-drivers/${season}`;
+                
+                fetch(endpoint)
+                    .then(response => response.json())
+                    .then(data => {
+                        // Hide spinner
+                        document.getElementById('spinner').style.display = 'none';
+                        
+                        if ((dataType === 'constructors' && (!data.constructors || data.constructors.length === 0)) ||
+                            (dataType === 'drivers' && (!data.drivers || data.drivers.length === 0))) {
+                            document.getElementById('results-container').innerHTML = 
+                                `<div class="alert alert-warning">No ${dataType} data found for the ${season} season. 
+                                You may need to trigger the ETL pipeline first.</div>`;
+                            return;
+                        }
+                        
+                        // Display results
+                        let html = '';
+                        if (dataType === 'constructors') {
+                            html = `<h3>F1 Constructors - ${season} Season</h3>
+                                    <div class="table-responsive">
+                                        <table class="table table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>Constructor</th>
+                                                    <th>Nationality</th>
+                                                    <th>Details</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>`;
+                            
+                            data.constructors.forEach(constructor => {
+                                html += `<tr>
+                                            <td>${constructor.name}</td>
+                                            <td>${constructor.nationality}</td>
+                                            <td><a href="${constructor.url}" target="_blank" class="btn btn-sm btn-info">More Info</a></td>
+                                        </tr>`;
+                            });
+                            
+                            html += `</tbody></table></div>`;
+                        } else {
+                            html = `<h3>F1 Drivers - ${season} Season</h3>
+                                    <div class="table-responsive">
+                                        <table class="table table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>Driver</th>
+                                                    <th>Code</th>
+                                                    <th>DOB</th>
+                                                    <th>Nationality</th>
+                                                    <th>Details</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>`;
+                            
+                            data.drivers.forEach(driver => {
+                                html += `<tr>
+                                            <td>${driver.first_name} ${driver.last_name}</td>
+                                            <td>${driver.code || '-'}</td>
+                                            <td>${driver.date_of_birth || '-'}</td>
+                                            <td>${driver.nationality}</td>
+                                            <td><a href="${driver.url}" target="_blank" class="btn btn-sm btn-info">More Info</a></td>
+                                        </tr>`;
+                            });
+                            
+                            html += `</tbody></table></div>`;
+                        }
+                        
+                        document.getElementById('results-container').innerHTML = html;
+                    })
+                    .catch(error => {
+                        console.error(`Error fetching ${dataType} data:`, error);
+                        document.getElementById('spinner').style.display = 'none';
+                        document.getElementById('results-container').innerHTML = 
+                            `<div class="alert alert-danger">Error loading ${dataType} data. Please check server connection.</div>`;
+                    });
+            }
+            
+            // Function to trigger ETL pipeline
+            function triggerETL() {
+                const dataType = document.getElementById('data-type').value;
+                const season = document.getElementById('season-input').value;
+                
+                // Validate season
+                if (!season || parseInt(season) < 1950 || parseInt(season) > new Date().getFullYear()) {
+                    alert(`Please enter a valid season between 1950 and ${new Date().getFullYear()}`);
+                    return;
+                }
+                
+                // Show spinner
+                document.getElementById('spinner').style.display = 'block';
+                document.getElementById('results-container').innerHTML = '';
+                document.getElementById('results-title').textContent = `Triggering ETL - ${season} Season`;
+                
+                // Send request to trigger ETL
+                fetch('/trigger-f1-data', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        season: season,
+                        type: dataType
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Hide spinner
+                    document.getElementById('spinner').style.display = 'none';
+                    
+                    if (data.success) {
+                        document.getElementById('results-container').innerHTML = 
+                            `<div class="alert alert-success">
+                                <h4>ETL Pipeline Triggered Successfully</h4>
+                                <p>${data.message}</p>
+                                <p>DAG Run ID: ${data.dag_run_id || 'N/A'}</p>
+                                <p>Please check Airflow UI for progress at <a href="http://localhost:8080" target="_blank">http://localhost:8080</a></p>
+                                <p>Once the ETL process completes, click "Fetch Data" to view the results.</p>
+                            </div>`;
+                        
+                        // Refresh available seasons after a short delay
+                        setTimeout(fetchAvailableSeasons, 3000);
+                    } else {
+                        document.getElementById('results-container').innerHTML = 
+                            `<div class="alert alert-danger">
+                                <h4>Error Triggering ETL Pipeline</h4>
+                                <p>${data.error || 'Unknown error'}</p>
+                            </div>`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error triggering ETL:', error);
+                    document.getElementById('spinner').style.display = 'none';
+                    document.getElementById('results-container').innerHTML = 
+                        `<div class="alert alert-danger">
+                            <h4>Error Communicating with Server</h4>
+                            <p>Could not trigger ETL pipeline. Please check server connection.</p>
+                        </div>`;
+                });
+            }
+        });
+    </script>
+</body>
+</html>

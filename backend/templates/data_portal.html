@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>F1 Data Portal</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 2rem;
+            background-color: #f8f9fa;
+        }
+        .header {
+            background-color: #e10600; /* F1 red */
+            color: white;
+            padding: 1rem 0;
+            margin-bottom: 2rem;
+            border-radius: 5px;
+        }
+        .card {
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .spinner-border {
+            display: none;
+            margin-left: 10px;
+        }
+        #error-message {
+            color: #e10600;
+            font-weight: bold;
+            margin-top: 1rem;
+        }
+        .f1-card {
+            transition: transform 0.2s;
+        }
+        .f1-card:hover {
+            transform: translateY(-5px);
+        }
+        .nav-tabs .nav-link.active {
+            font-weight: bold;
+            border-bottom: 3px solid #e10600;
+        }
+        .data-label {
+            font-weight: bold;
+            color: #666;
+        }
+        .season-tag {
+            background-color: #e10600;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header text-center">
+            <h1>Formula 1 Data Portal</h1>
+            <p>Access historical F1 data by season</p>
+        </div>
+        
+        <div class="row mb-4">
+            <div class="col-md-6 mx-auto">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Select F1 Season & Data Type</h5>
+                        <div class="mb-3">
+                            <div class="input-group">
+                                <input type="number" id="season-input" class="form-control" 
+                                       placeholder="Enter season year (1950-present)" min="1950" max="2024">
+                                <select class="form-select" id="data-type-select" style="max-width: 150px;">
+                                    <option value="constructors">Constructors</option>
+                                    <option value="drivers">Drivers</option>
+                                </select>
+                                <button class="btn btn-primary" id="fetch-btn">Fetch Data</button>
+                                <div class="spinner-border text-primary" id="loading-spinner" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="error-message"></div>
+                        <div class="mt-3">
+                            <small class="text-muted">Available seasons:</small>
+                            <div id="available-seasons" class="mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-12">
+                <ul class="nav nav-tabs mb-4" id="data-tabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="constructors-tab" data-bs-toggle="tab" 
+                                data-bs-target="#constructors-content" type="button" role="tab" 
+                                aria-controls="constructors-content" aria-selected="true">Constructors</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="drivers-tab" data-bs-toggle="tab" 
+                                data-bs-target="#drivers-content" type="button" role="tab" 
+                                aria-controls="drivers-content" aria-selected="false">Drivers</button>
+                    </li>
+                </ul>
+                
+                <div class="tab-content" id="myTabContent">
+                    <div class="tab-pane fade show active" id="constructors-content" role="tabpanel" aria-labelledby="constructors-tab">
+                        <h2 id="constructors-heading" style="display: none;">Constructors for <span id="constructors-season-display"></span> Season</h2>
+                        <div id="constructors-container" class="row mt-3"></div>
+                    </div>
+                    
+                    <div class="tab-pane fade" id="drivers-content" role="tabpanel" aria-labelledby="drivers-tab">
+                        <h2 id="drivers-heading" style="display: none;">Drivers for <span id="drivers-season-display"></span> Season</h2>
+                        <div id="drivers-container" class="row mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load available seasons
+            fetchAvailableSeasons();
+            
+            // Set up event listener for fetch button
+            document.getElementById('fetch-btn').addEventListener('click', function() {
+                const season = document.getElementById('season-input').value;
+                const dataType = document.getElementById('data-type-select').value;
+                
+                if (!season) {
+                    showError('Please enter a valid season year');
+                    return;
+                }
+                
+                if (dataType === 'constructors') {
+                    getConstructors(season);
+                    // Switch to constructors tab
+                    document.getElementById('constructors-tab').click();
+                } else {
+                    getDrivers(season);
+                    // Switch to drivers tab
+                    document.getElementById('drivers-tab').click();
+                }
+            });
+            
+            // Set max year to current year
+            const currentYear = new Date().getFullYear();
+            document.getElementById('season-input').max = currentYear;
+        });
+        
+        function fetchAvailableSeasons() {
+            fetch('/get-available-seasons')
+                .then(response => response.json())
+                .then(data => {
+                    const seasonsDiv = document.getElementById('available-seasons');
+                    if (data.all_seasons && data.all_seasons.length > 0) {
+                        const buttons = data.all_seasons.map(season => {
+                            const hasConstructors = data.constructor_seasons.includes(season);
+                            const hasDrivers = data.driver_seasons.includes(season);
+                            
+                            let classes = 'btn btn-sm btn-outline-secondary me-1 mb-1';
+                            let badgeHTML = '';
+                            
+                            if (hasConstructors) {
+                                badgeHTML += '<span class="season-tag">C</span>';
+                            }
+                            if (hasDrivers) {
+                                badgeHTML += '<span class="season-tag">D</span>';
+                            }
+                            
+                            return `<button class="${classes}" 
+                                    onclick="seasonButtonClick('${season}')">${season} ${badgeHTML}</button>`;
+                        }).join('');
+                        seasonsDiv.innerHTML = buttons;
+                    } else {
+                        seasonsDiv.innerHTML = '<em>No seasons available yet. Fetch a season to get started!</em>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching seasons:', error);
+                    showError('Failed to load available seasons');
+                });
+        }
+        
+        function seasonButtonClick(season) {
+            document.getElementById('season-input').value = season;
+            
+            // Check if we have both data types for this season
+            fetch('/get-available-seasons')
+                .then(response => response.json())
+                .then(data => {
+                    const hasConstructors = data.constructor_seasons.includes(season);
+                    const hasDrivers = data.driver_seasons.includes(season);
+                    
+                    if (hasConstructors) {
+                        getConstructors(season);
+                        document.getElementById('constructors-tab').click();
+                    } else if (hasDrivers) {
+                        getDrivers(season);
+                        document.getElementById('drivers-tab').click();
+                    } else {
+                        // Default to constructors if neither exists
+                        document.getElementById('data-type-select').value = 'constructors';
+                        document.getElementById('fetch-btn').click();
+                    }
+                });
+        }
+        
+        function getConstructors(season) {
+            showLoading(true);
+            hideError();
+            
+            fetch(`/get-f1-constructors/${season}`)
+                .then(response => response.json())
+                .then(data => {
+                    showLoading(false);
+                    
+                    if (data.error) {
+                        showError(data.error);
+                        return;
+                    }
+                    
+                    if (data.constructors && data.constructors.length > 0) {
+                        // Data found in DB, display it
+                        displayConstructors(data.constructors, season);
+                    } else {
+                        // No data found, trigger Airflow DAG
+                        triggerDataFetch(season, 'constructors');
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError('Error fetching constructor data: ' + error.message);
+                });
+        }
+        
+        function getDrivers(season) {
+            showLoading(true);
+            hideError();
+            
+            fetch(`/get-f1-drivers/${season}`)
+                .then(response => response.json())
+                .then(data => {
+                    showLoading(false);
+                    
+                    if (data.error) {
+                        showError(data.error);
+                        return;
+                    }
+                    
+                    if (data.drivers && data.drivers.length > 0) {
+                        // Data found in DB, display it
+                        displayDrivers(data.drivers, season);
+                    } else {
+                        // No data found, trigger Airflow DAG
+                        triggerDataFetch(season, 'drivers');
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError('Error fetching driver data: ' + error.message);
+                });
+        }
+        
+        function triggerDataFetch(season, dataType) {
+            const dataTypeName = dataType === 'constructors' ? 'constructor' : 'driver';
+            const shouldTrigger = confirm(`No ${dataTypeName} data found for season ${season}. Would you like to fetch this data from the F1 API?`);
+            
+            if (shouldTrigger) {
+                showLoading(true);
+                fetch('/trigger-f1-data', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        season: season,
+                        type: dataType
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    showLoading(false);
+                    if (data.success) {
+                        alert(`${dataTypeName.charAt(0).toUpperCase() + dataTypeName.slice(1)} data fetch initiated for season ${season}. This may take a few minutes to complete. Please check back later.`);
+                        fetchAvailableSeasons(); // Refresh season list
+                    } else {
+                        showError(`Failed to trigger data fetch: ${data.error}`);
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError('Error triggering data fetch: ' + error.message);
+                });
+            }
+        }
+        
+        function displayConstructors(constructors, season) {
+            const container = document.getElementById('constructors-container');
+            container.innerHTML = '';
+            
+            document.getElementById('constructors-heading').style.display = 'block';
+            document.getElementById('constructors-season-display').textContent = season;
+            
+            constructors.forEach(constructor => {
+                const card = document.createElement('div');
+                card.className = 'col-md-4 mb-4';
+                card.innerHTML = `
+                    <div class="card f1-card">
+                        <div class="card-body">
+                            <h5 class="card-title">${constructor.name}</h5>
+                            <h6 class="card-subtitle mb-2 text-muted">${constructor.nationality}</h6>
+                            <p class="card-text">ID: ${constructor.constructor_id}</p>
+                            <a href="${constructor.url}" class="btn btn-sm btn-outline-primary" target="_blank">More Info</a>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+        
+        function displayDrivers(drivers, season) {
+            const container = document.getElementById('drivers-container');
+            container.innerHTML = '';
+            
+            document.getElementById('drivers-heading').style.display = 'block';
+            document.getElementById('drivers-season-display').textContent = season;
+            
+            drivers.forEach(driver => {
+                const card = document.createElement('div');
+                card.className = 'col-md-4 mb-4';
+                
+                // Format the driver info
+                const fullName = `${driver.first_name} ${driver.last_name}`;
+                const code = driver.code ? `<span class="badge bg-dark">${driver.code}</span>` : '';
+                const dateOfBirth = driver.date_of_birth ? new Date(driver.date_of_birth).toLocaleDateString() : 'Unknown';
+                
+                card.innerHTML = `
+                    <div class="card f1-card">
+                        <div class="card-body">
+                            <h5 class="card-title">${fullName} ${code}</h5>
+                            <h6 class="card-subtitle mb-2 text-muted">${driver.nationality}</h6>
+                            <p class="card-text">
+                                <span class="data-label">DOB:</span> ${dateOfBirth}<br>
+                                <span class="data-label">ID:</span> ${driver.driver_id}
+                            </p>
+                            <a href="${driver.url}" class="btn btn-sm btn-outline-primary" target="_blank">More Info</a>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+        
+        function showLoading(isLoading) {
+            const spinner = document.getElementById('loading-spinner');
+            spinner.style.display = isLoading ? 'inline-block' : 'none';
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+        
+        function hideError() {
+            document.getElementById('error-message').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

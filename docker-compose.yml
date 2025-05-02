@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: f1_data
+      POSTGRES_DB: postgres
     ports:
       - "5432:5432"
     volumes:
@@ -44,6 +44,28 @@ services:
       - ./requirements.txt:/requirements.txt
     command: >
       bash -c "pip install --no-cache-dir -r /requirements.txt && airflow scheduler"
+
+  flask-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.flask
+    container_name: f1_flask_app
+    depends_on:
+      - postgres
+      - airflow-webserver
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=development
+      - DB_HOST=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=f1_data
+      - AIRFLOW_API_URL=http://airflow-webserver:8080/api
+    volumes:
+      - ./backend:/app/backend
+      - ./templates:/app/templates
+    ports:
+      - "5000:5000"
 
 volumes:
   postgres_data:
